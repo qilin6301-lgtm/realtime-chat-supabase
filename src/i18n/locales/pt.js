@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'Plataforma de encontros', login: 'Entrar', register: 'Registrar', logout: 'Sair', gender: 'Gênero', male: 'Masculino', female: 'Feminino', age: 'Idade', country: 'País', square: 'Feed', chats: 'Chats', friends: 'Amigos', profile: 'Perfil', send: 'Enviar', search: 'Buscar', online: 'Online', typing: 'digitando...', language: 'Idioma', input_message: 'Digite uma mensagem...', same_gender_block: 'Chat entre o mesmo gênero não permitido', remove_friend: 'Remover amigo', delete: 'Excluir', edit: 'Editar', read: 'Lido' }
