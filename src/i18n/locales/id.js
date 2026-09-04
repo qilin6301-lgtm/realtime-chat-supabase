@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'Platform Kencan', login: 'Masuk', register: 'Daftar', logout: 'Keluar', gender: 'Jenis kelamin', male: 'Pria', female: 'Wanita', age: 'Usia', country: 'Negara', square: 'Feed', chats: 'Obrolan', friends: 'Teman', profile: 'Profil', send: 'Kirim', search: 'Cari', online: 'Online', typing: 'mengetik...', language: 'Bahasa', input_message: 'Tulis pesan...', same_gender_block: 'Chat sesama gender tidak diizinkan', remove_friend: 'Hapus teman', delete: 'Hapus', edit: 'Edit', read: 'Dibaca' }
