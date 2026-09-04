@@ -1,43 +1,100 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../../src/lib/supabaseClient';
+import { useAuth } from '../../../src/lib/useAuth';
 
 export default function RoomPage({ params }: any) {
   const { id } = params;
   const [messages, setMessages] = useState<any[]>([]);
   const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(true);
+  const pageSize = 30; // configurable
+  const earliestRef = useRef<Date | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
-    // load existing
-    async function load() {
-      const { data } = await supabase.from('messages').select('*').eq('room_id', id).order('created_at', { ascending: true });
-      setMessages(data || []);
-    }
-    load();
+    let mounted = true;
+    async function loadInitial() {
+      setLoading(true);
+      // fetch latest pageSize messages (most recent)
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('room_id', id)
+        .order('created_at', { ascending: false })
+        .limit(pageSize);
 
-    const sub = supabase
+      if (error) {
+        console.error('load messages error', error);
+        setLoading(false);
+        return;
+      }
+      if (!mounted) return;
+
+      const msgs = (data || []).reverse(); // oldest -> newest
+      setMessages(msgs);
+      earliestRef.current = msgs.length ? new Date(msgs[0].created_at) : null;
+      setHasMore((data || []).length === pageSize);
+      setLoading(false);
+    }
+    loadInitial();
+
+    const channel = supabase
       .channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${id}` }, payload => {
         setMessages(prev => [...prev, payload.new]);
       })
       .subscribe();
 
-    return () => { sub.unsubscribe(); };
+    return () => {
+      mounted = false;
+      channel.unsubscribe();
+    };
   }, [id]);
+
+  async function loadOlder() {
+    if (!earliestRef.current) return;
+    const before = earliestRef.current.toISOString();
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('room_id', id)
+      .lt('created_at', before)
+      .order('created_at', { ascending: false })
+      .limit(pageSize);
+
+    if (error) return console.error(error);
+    const msgs = (data || []).reverse();
+    if (msgs.length) {
+      setMessages(prev => [...msgs, ...prev]);
+      earliestRef.current = new Date(msgs[0].created_at);
+    }
+    setHasMore((data || []).length === pageSize);
+  }
 
   async function send() {
     if (!text) return;
-    await supabase.from('messages').insert([{ room_id: id, content: text }]);
-    setText('');
+    try {
+      await supabase.from('messages').insert([{ room_id: id, content: text, author: user?.id }]);
+      setText('');
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   return (
-    <div style={{padding:24}}>
+    <div style={{ padding: 24 }}>
       <h2>Room {id}</h2>
-      <div style={{height:300,overflow:'auto',border:'1px solid #ddd',padding:8}}>
-        {messages.map(m=> <div key={m.id}><strong>{m.author}</strong>: {m.content}</div>)}
+      <div>
+        {hasMore && <button onClick={loadOlder}>加载更早消息</button>}
+      </div>
+      <div style={{ height: 400, overflow: 'auto', border: '1px solid #ddd', padding: 8 }}>
+        {messages.map(m => (
+          <div key={m.id}><strong>{m.author}</strong>: {m.content}</div>
+        ))}
       </div>
       <div>
-        <input value={text} onChange={e=>setText(e.target.value)} />
+        <input value={text} onChange={e => setText(e.target.value)} />
         <button onClick={send}>Send</button>
       </div>
     </div>

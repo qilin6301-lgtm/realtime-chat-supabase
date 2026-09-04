@@ -6,7 +6,8 @@ import { useAuth } from '../../src/lib/useAuth';
 export default function RoomsIndex() {
   const [rooms, setRooms] = useState<any[]>([]);
   const [name, setName] = useState('');
-  const { user, loading } = useAuth();
+  const [isPublic, setIsPublic] = useState(true);
+  const { user } = useAuth();
 
   useEffect(() => {
     async function load() {
@@ -28,8 +29,12 @@ export default function RoomsIndex() {
   async function createRoom(e: React.FormEvent) {
     e.preventDefault();
     if (!user) return alert('请先登录');
-    const { error } = await supabase.from('rooms').insert([{ name, created_by: user.id }]);
+    // create room with created_by = user.id
+    const { data, error } = await supabase.from('rooms').insert([{ name, is_public: isPublic, created_by: user.id }]).select().single();
     if (error) return alert(error.message);
+    const room = data;
+    // add creator as admin to rooms_members
+    await supabase.from('rooms_members').insert([{ room_id: room.id, user_id: user.id, role: 'admin' }]);
     setName('');
   }
 
@@ -40,6 +45,9 @@ export default function RoomsIndex() {
       <div>
         <form onSubmit={createRoom}>
           <input placeholder="新房间名" value={name} onChange={e => setName(e.target.value)} />
+          <label style={{ marginLeft: 8 }}>
+            <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} /> 公共房间
+          </label>
           <button type="submit">创建房间</button>
         </form>
       </div>
@@ -47,7 +55,7 @@ export default function RoomsIndex() {
       <ul>
         {rooms.map(r => (
           <li key={r.id}>
-            <Link href={`/rooms/${r.id}`}>{r.name || r.id}</Link>
+            <Link href={`/rooms/${r.id}`}>{r.name || r.id} {r.is_public ? '' : '(私有)'}</Link>
           </li>
         ))}
       </ul>
