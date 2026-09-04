@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'منصة تعارف', login: 'تسجيل الدخول', register: 'تسجيل', logout: 'خروج', gender: 'الجنس', male: 'ذكر', female: 'أنثى', age: 'العمر', country: 'الدولة', square: 'الساحة', chats: 'المحادثات', friends: 'الأصدقاء', profile: 'ملفي', send: 'إرسال', search: 'بحث', online: 'متصل', typing: 'يكتب...', language: 'اللغة', input_message: 'اكتب رسالة...', same_gender_block: 'الدردشة بين نفس الجنس غير مسموحة', remove_friend: 'حذف الصديق', delete: 'حذف', edit: 'تعديل', read: 'مقروء' }
