@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'Nền tảng hẹn hò', login: 'Đăng nhập', register: 'Đăng ký', logout: 'Đăng xuất', gender: 'Giới tính', male: 'Nam', female: 'Nữ', age: 'Tuổi', country: 'Quốc gia', square: 'Bảng tin', chats: 'Tin nhắn', friends: 'Bạn bè', profile: 'Hồ sơ', send: 'Gửi', search: 'Tìm kiếm', online: 'Trực tuyến', typing: 'đang nhập...', language: 'Ngôn ngữ', input_message: 'Nhập tin nhắn...', same_gender_block: 'Không cho phép chat cùng giới', remove_friend: 'Xóa bạn', delete: 'Xóa', edit: 'Sửa', read: 'Đã đọc' }
