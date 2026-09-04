@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'Tanışma Platformu', login: 'Giriş', register: 'Kayıt', logout: 'Çıkış', gender: 'Cinsiyet', male: 'Erkek', female: 'Kadın', age: 'Yaş', country: 'Ülke', square: 'Akış', chats: 'Sohbetler', friends: 'Arkadaşlar', profile: 'Profil', send: 'Gönder', search: 'Ara', online: 'Çevrimiçi', typing: 'yazıyor...', language: 'Dil', input_message: 'Mesaj yazın...', same_gender_block: 'Aynı cinsiyetle sohbet yasak', remove_friend: 'Arkadaşı sil', delete: 'Sil', edit: 'Düzenle', read: 'Okundu' }
