@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'डेटिंग प्लेटफ़ॉर्म', login: 'लॉगिन', register: 'रजिस्टर', logout: 'लॉग आउट', gender: 'लिंग', male: 'पुरुष', female: 'महिला', age: 'उम्र', country: 'देश', square: 'फ़ीड', chats: 'चैट', friends: 'मित्र', profile: 'प्रोफ़ाइल', send: 'भेजें', search: 'खोजें', online: 'ऑनलाइन', typing: 'टाइप कर रहा है...', language: 'भाषा', input_message: 'संदेश लिखें...', same_gender_block: 'समान लिंग से चैट की अनुमति नहीं', remove_friend: 'मित्र हटाएं', delete: 'हटाएं', edit: 'संपादित', read: 'पढ़ा' }
