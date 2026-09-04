@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { useI18n } from '../i18n'
+import { notifyNewMessage } from '../lib/notify'
 
 const EMOJIS = ['😀','😂','🥰','😍','😘','😊','🤔','😅','😭','😡','👍','👎','❤️','🔥','🎉','🌹','💋','🎁','💯','🙏']
 
 export default function ChatWindow({ conversation, profile, onBack }) {
+  const { t, countryName } = useI18n()
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
@@ -14,8 +17,11 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   const [myLikes, setMyLikes] = useState(new Set())
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
+  const [peerTyping, setPeerTyping] = useState(false)
   const endRef = useRef(null)
   const fileRef = useRef(null)
+  const typingChannelRef = useRef(null)
+  const typingTimerRef = useRef(null)
   const other = conversation.otherUser
 
   useEffect(() => {
@@ -26,24 +32,62 @@ export default function ChatWindow({ conversation, profile, onBack }) {
     const channel = supabase
       .channel(`messages:${conversation.id}`)
       .on('postgres_changes', {
-        event: '*',
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversation.id}`
+      }, (payload) => {
+        const msg = payload.new
+        setMessages(prev => [...prev, msg])
+        if (msg.sender_id !== profile.id) {
+          markAsRead()
+          notifyNewMessage({
+            title: other?.username || t('new_message'),
+            body: msg.msg_type === 'image' ? '[image]' : msg.msg_type === 'gift' ? `[${t('gift')}]` : msg.content
+          })
+        }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
         schema: 'public',
         table: 'messages',
         filter: `conversation_id=eq.${conversation.id}`
       }, () => fetchMessages())
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'message_likes'
-      }, () => loadMyLikes())
       .subscribe()
 
-    return () => supabase.removeChannel(channel)
+    // Typing broadcast
+    const typingCh = supabase.channel(`typing:${conversation.id}`, {
+      config: { broadcast: { self: false } }
+    })
+    typingCh
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        if (payload?.user_id !== profile.id) {
+          setPeerTyping(true)
+          clearTimeout(typingTimerRef.current)
+          typingTimerRef.current = setTimeout(() => setPeerTyping(false), 2000)
+        }
+      })
+      .subscribe()
+    typingChannelRef.current = typingCh
+
+    return () => {
+      supabase.removeChannel(channel)
+      supabase.removeChannel(typingCh)
+      clearTimeout(typingTimerRef.current)
+    }
   }, [conversation.id])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, peerTyping])
+
+  function broadcastTyping() {
+    typingChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { user_id: profile.id }
+    })
+  }
 
   async function fetchMessages() {
     setLoading(true)
@@ -53,7 +97,6 @@ export default function ChatWindow({ conversation, profile, onBack }) {
       .eq('conversation_id', conversation.id)
       .order('created_at', { ascending: true })
       .limit(200)
-
     setMessages((data || []).filter(m => !m.is_deleted || m.sender_id === profile.id))
     setLoading(false)
     loadMyLikes(data)
@@ -62,13 +105,9 @@ export default function ChatWindow({ conversation, profile, onBack }) {
 
   async function loadMyLikes(msgs) {
     const list = msgs || messages
-    if (!list.length) return
+    if (!list?.length) return
     const ids = list.map(m => m.id)
-    const { data } = await supabase
-      .from('message_likes')
-      .select('message_id')
-      .eq('user_id', profile.id)
-      .in('message_id', ids)
+    const { data } = await supabase.from('message_likes').select('message_id').eq('user_id', profile.id).in('message_id', ids)
     setMyLikes(new Set((data || []).map(d => d.message_id)))
   }
 
@@ -77,19 +116,14 @@ export default function ChatWindow({ conversation, profile, onBack }) {
     setGifts(data || [])
   }
 
-  // 标记对方发来的消息为已读
   async function markAsRead() {
-    await supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('conversation_id', conversation.id)
-      .neq('sender_id', profile.id)
-      .is('read_at', null)
+    await supabase.from('messages').update({ read_at: new Date().toISOString() })
+      .eq('conversation_id', conversation.id).neq('sender_id', profile.id).is('read_at', null)
   }
 
   async function sendMessage(content, msg_type = 'text', gift_id = null) {
     if (other.gender === profile.gender) {
-      alert('同性别禁止聊天')
+      alert(t('same_gender_block'))
       return
     }
     const { error } = await supabase.from('messages').insert({
@@ -100,11 +134,11 @@ export default function ChatWindow({ conversation, profile, onBack }) {
       gift_id
     })
     if (error) {
-      alert('发送失败：' + error.message)
+      alert(error.message)
       return
     }
     await supabase.from('conversations').update({
-      last_message: msg_type === 'gift' ? '[礼物]' : msg_type === 'image' ? '[图片]' : content,
+      last_message: msg_type === 'gift' ? `[${t('gift')}]` : msg_type === 'image' ? '[image]' : content,
       last_message_at: new Date().toISOString()
     }).eq('id', conversation.id)
   }
@@ -130,17 +164,15 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   }
 
   async function softDelete(msg) {
-    if (!confirm('确定删除这条消息？')) return
-    await supabase.from('messages').update({ is_deleted: true, content: '[已删除]' }).eq('id', msg.id)
+    if (!confirm(t('delete_msg_confirm'))) return
+    // 软删除：自己可见为已删除，对方也看到已删除文案
+    await supabase.from('messages').update({ is_deleted: true, content: t('deleted_msg') }).eq('id', msg.id)
     fetchMessages()
   }
 
   async function saveEdit(msg) {
     if (!editText.trim()) return
-    await supabase.from('messages').update({
-      content: editText.trim(),
-      edited_at: new Date().toISOString()
-    }).eq('id', msg.id)
+    await supabase.from('messages').update({ content: editText.trim(), edited_at: new Date().toISOString() }).eq('id', msg.id)
     setEditingId(null)
     setEditText('')
     fetchMessages()
@@ -148,24 +180,18 @@ export default function ChatWindow({ conversation, profile, onBack }) {
 
   async function sendGift(gift) {
     if (parseFloat(profile.balance) < parseFloat(gift.price)) {
-      alert('余额不足，请先充值')
+      alert(t('insufficient_balance'))
       return
     }
     const newBalance = parseFloat(profile.balance) - parseFloat(gift.price)
     await supabase.from('profiles').update({ balance: newBalance }).eq('id', profile.id)
     await supabase.from('consume_records').insert({
-      user_id: profile.id,
-      amount: gift.price,
-      type: 'gift',
-      related_id: gift.id,
-      remark: `赠送 ${gift.name} 给 ${other.username}`
+      user_id: profile.id, amount: gift.price, type: 'gift', related_id: gift.id,
+      remark: `${gift.name} -> ${other.username}`
     })
     await supabase.from('gift_sends').insert({
-      gift_id: gift.id,
-      sender_id: profile.id,
-      receiver_id: other.id,
-      conversation_id: conversation.id,
-      price: gift.price
+      gift_id: gift.id, sender_id: profile.id, receiver_id: other.id,
+      conversation_id: conversation.id, price: gift.price
     })
     await sendMessage(gift.name, 'gift', gift.id)
     setShowGifts(false)
@@ -174,14 +200,14 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   async function handleImageUpload(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) return alert('请选择图片')
-    if (file.size > 5 * 1024 * 1024) return alert('图片不能超过 5MB')
+    if (!file.type.startsWith('image/')) return
+    if (file.size > 5 * 1024 * 1024) return alert('Max 5MB')
     setUploading(true)
     const ext = file.name.split('.').pop()
     const path = `${profile.id}/${Date.now()}.${ext}`
     const { error } = await supabase.storage.from('posts').upload(path, file)
     if (error) {
-      alert('上传失败：' + error.message)
+      alert(error.message)
       setUploading(false)
       return
     }
@@ -210,33 +236,39 @@ export default function ChatWindow({ conversation, profile, onBack }) {
         <div>
           <div style={{ fontWeight: 600 }}>{other?.username}</div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-            <span className={`gender-tag ${other?.gender === 'male' ? 'gender-male' : 'gender-female'}`}>
-              {other?.gender === 'male' ? '♂ 男' : '♀ 女'} · {other?.age}岁
-            </span>
+            {peerTyping ? (
+              <span style={{ color: 'var(--accent)' }}>{t('typing')}</span>
+            ) : (
+              <>
+                <span className={`gender-tag ${other?.gender === 'male' ? 'gender-male' : 'gender-female'}`}>
+                  {other?.gender === 'male' ? '♂' : '♀'} {t('years_old', { age: other?.age })}
+                </span>
+                {other?.country && <span style={{ marginLeft: 6 }}>· {countryName(other.country)}</span>}
+              </>
+            )}
           </div>
         </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {loading ? (
-          <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>加载消息...</p>
+          <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>{t('loading')}</p>
         ) : messages.length === 0 ? (
-          <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>还没有消息，打个招呼吧</p>
+          <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>{t('no_messages')}</p>
         ) : messages.map(msg => {
           const isMe = msg.sender_id === profile.id
           const isDeleted = msg.is_deleted
-
           return (
             <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
               {editingId === msg.id ? (
                 <div style={{ display: 'flex', gap: 6, maxWidth: '80%' }}>
                   <input className="input" value={editText} onChange={e => setEditText(e.target.value)} style={{ flex: 1 }} />
-                  <button className="btn btn-primary" style={{ padding: '6px 10px' }} onClick={() => saveEdit(msg)}>保存</button>
-                  <button className="btn btn-ghost" style={{ padding: '6px 10px' }} onClick={() => setEditingId(null)}>取消</button>
+                  <button className="btn btn-primary" style={{ padding: '6px 10px' }} onClick={() => saveEdit(msg)}>{t('save')}</button>
+                  <button className="btn btn-ghost" style={{ padding: '6px 10px' }} onClick={() => setEditingId(null)}>{t('cancel')}</button>
                 </div>
               ) : isDeleted ? (
                 <div className={`message-bubble ${isMe ? 'message-out' : 'message-in'}`} style={{ opacity: 0.5, fontStyle: 'italic' }}>
-                  [已删除]
+                  {t('deleted_msg')}
                 </div>
               ) : msg.msg_type === 'image' ? (
                 <img src={msg.content} alt="" style={{ maxWidth: 220, borderRadius: 12, cursor: 'pointer' }} onClick={() => window.open(msg.content)} />
@@ -244,19 +276,17 @@ export default function ChatWindow({ conversation, profile, onBack }) {
                 <div className={`message-bubble ${isMe ? 'message-out' : 'message-in'}`} style={{ textAlign: 'center', minWidth: 100 }}>
                   <div style={{ fontSize: 32 }}>🎁</div>
                   <div style={{ fontWeight: 600 }}>{msg.content}</div>
-                  <div style={{ fontSize: 12, opacity: 0.8 }}>送出了礼物</div>
                 </div>
               ) : (
                 <div className={`message-bubble ${isMe ? 'message-out' : 'message-in'}`}>
                   {msg.content}
-                  {msg.edited_at && <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 6 }}>(已编辑)</span>}
+                  {msg.edited_at && <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 6 }}>({t('edited')})</span>}
                 </div>
               )}
-
               {!isDeleted && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, padding: '0 4px', fontSize: 11, color: 'var(--text-muted)' }}>
-                  <span>{new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-                  {isMe && msg.read_at && <span style={{ color: 'var(--accent)' }}>已读</span>}
+                  <span>{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  {isMe && msg.read_at && <span style={{ color: 'var(--accent)' }}>{t('read')}</span>}
                   <button onClick={() => toggleLike(msg)} style={{
                     background: 'none', border: 'none', cursor: 'pointer', fontSize: 12,
                     color: myLikes.has(msg.id) ? '#f48fb1' : 'var(--text-muted)'
@@ -265,12 +295,8 @@ export default function ChatWindow({ conversation, profile, onBack }) {
                   </button>
                   {isMe && msg.msg_type === 'text' && (
                     <>
-                      <button onClick={() => { setEditingId(msg.id); setEditText(msg.content) }} style={{
-                        background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--text-muted)'
-                      }}>编辑</button>
-                      <button onClick={() => softDelete(msg)} style={{
-                        background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--text-muted)'
-                      }}>删除</button>
+                      <button onClick={() => { setEditingId(msg.id); setEditText(msg.content) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--text-muted)' }}>{t('edit')}</button>
+                      <button onClick={() => softDelete(msg)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--text-muted)' }}>{t('delete')}</button>
                     </>
                   )}
                 </div>
@@ -284,26 +310,22 @@ export default function ChatWindow({ conversation, profile, onBack }) {
       {showEmoji && (
         <div style={{ padding: 10, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {EMOJIS.map(em => (
-            <button key={em} onClick={() => { setText(t => t + em); setShowEmoji(false) }} style={{
-              background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', padding: 4
-            }}>{em}</button>
+            <button key={em} onClick={() => { setText(x => x + em); setShowEmoji(false) }} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', padding: 4 }}>{em}</button>
           ))}
         </div>
       )}
 
       {showGifts && (
         <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto' }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>选择礼物（余额 ¥{(profile.balance || 0).toFixed(2)}）</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{t('send_gift')} (¥{(profile.balance || 0).toFixed(2)})</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-            {gifts.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>暂无礼物</p>
-            ) : gifts.map(g => (
+            {gifts.map(g => (
               <button key={g.id} onClick={() => sendGift(g)} style={{
                 background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 10,
                 padding: '8px 12px', cursor: 'pointer', color: 'var(--text-primary)', minWidth: 70, textAlign: 'center'
               }}>
                 <div style={{ fontSize: 24 }}>{g.icon_url ? <img src={g.icon_url} alt="" style={{ width: 28, height: 28 }} /> : '🎁'}</div>
-                <div style={{ fontSize: 12, marginTop: 2 }}>{g.name}</div>
+                <div style={{ fontSize: 12 }}>{g.name}</div>
                 <div style={{ fontSize: 11, color: 'var(--accent)' }}>¥{parseFloat(g.price).toFixed(0)}</div>
               </button>
             ))}
@@ -315,18 +337,18 @@ export default function ChatWindow({ conversation, profile, onBack }) {
         padding: '10px 12px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 8
       }}>
-        <button type="button" onClick={() => { setShowEmoji(!showEmoji); setShowGifts(false) }} style={{
-          background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-secondary)'
-        }}>😊</button>
-        <button type="button" onClick={() => { setShowGifts(!showGifts); setShowEmoji(false) }} style={{
-          background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-secondary)'
-        }}>🎁</button>
-        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} style={{
-          background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-secondary)'
-        }}>{uploading ? '...' : '🖼'}</button>
+        <button type="button" onClick={() => { setShowEmoji(!showEmoji); setShowGifts(false) }} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-secondary)' }}>😊</button>
+        <button type="button" onClick={() => { setShowGifts(!showGifts); setShowEmoji(false) }} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: 'var(--text-secondary)' }}>🎁</button>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-secondary)' }}>{uploading ? '...' : '🖼'}</button>
         <input type="file" ref={fileRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
-        <input className="input" value={text} onChange={e => setText(e.target.value)} placeholder="输入消息..." style={{ borderRadius: 22, padding: '10px 16px', flex: 1 }} />
-        <button className="btn btn-primary" type="submit" style={{ borderRadius: 22, padding: '10px 16px' }}>发送</button>
+        <input
+          className="input"
+          value={text}
+          onChange={e => { setText(e.target.value); broadcastTyping() }}
+          placeholder={t('input_message')}
+          style={{ borderRadius: 22, padding: '10px 16px', flex: 1 }}
+        />
+        <button className="btn btn-primary" type="submit" style={{ borderRadius: 22, padding: '10px 16px' }}>{t('send')}</button>
       </form>
     </div>
   )
