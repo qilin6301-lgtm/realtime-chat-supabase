@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'แพลตฟอร์มเดท', login: 'เข้าสู่ระบบ', register: 'สมัคร', logout: 'ออกจากระบบ', gender: 'เพศ', male: 'ชาย', female: 'หญิง', age: 'อายุ', country: 'ประเทศ', square: 'ฟีด', chats: 'แชท', friends: 'เพื่อน', profile: 'โปรไฟล์', send: 'ส่ง', search: 'ค้นหา', online: 'ออนไลน์', typing: 'กำลังพิมพ์...', language: 'ภาษา', input_message: 'พิมพ์ข้อความ...', same_gender_block: 'ห้ามแชทเพศเดียวกัน', remove_friend: 'ลบเพื่อน', delete: 'ลบ', edit: 'แก้ไข', read: 'อ่านแล้ว' }
