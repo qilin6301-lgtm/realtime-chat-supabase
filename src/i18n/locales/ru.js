@@ -1,0 +1,2 @@
+import en from './en'
+export default { ...en, app_name: 'Платформа знакомств', login: 'Вход', register: 'Регистрация', logout: 'Выйти', gender: 'Пол', male: 'Мужской', female: 'Женский', age: 'Возраст', country: 'Страна', square: 'Лента', chats: 'Чаты', friends: 'Друзья', profile: 'Профиль', send: 'Отправить', search: 'Поиск', online: 'В сети', typing: 'печатает...', language: 'Язык', input_message: 'Введите сообщение...', same_gender_block: 'Чат с тем же полом запрещён', remove_friend: 'Удалить друга', delete: 'Удалить', edit: 'Изменить', read: 'Прочитано' }
