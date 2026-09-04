@@ -16,4 +16,8 @@ create policy "allow_insert_authenticated" on messages
 create policy "rooms_select_authenticated" on rooms
   for select using (auth.role() = 'authenticated');
 
+-- Allow authenticated users to insert rooms where created_by matches auth.uid()
+create policy "rooms_insert_authenticated" on rooms
+  for insert with check (auth.role() = 'authenticated' and created_by = auth.uid());
+
 -- Note: For private rooms and membership you'll need additional tables and policies.
