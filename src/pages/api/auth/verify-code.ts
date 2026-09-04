@@ -1,34 +1,39 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { supabaseAdmin } from '../../../src/lib/supabaseServerClient';
-import crypto from 'crypto';
 
-const HMAC_SECRET = process.env.VERIFICATION_HMAC_SECRET || '';
-
-function hashCode(email: string, code: string) {
-  return crypto.createHmac('sha256', HMAC_SECRET).update(`${email}|${code}`).digest('hex');
-}
+const MAX_ATTEMPTS = 5;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).end();
   const { email, code, password } = req.body;
   if (!email || !code || !password) return res.status(400).json({ error: 'missing fields' });
 
-  const codeHash = hashCode(email, code);
-
-  const { data, error } = await supabaseAdmin
-    .from('verification_codes')
-    .select('*')
-    .eq('email', email)
-    .eq('code_hash', codeHash)
-    .gt('expires_at', new Date().toISOString())
-    .limit(1)
-    .single();
-
-  if (error || !data) {
-    return res.status(400).json({ error: 'invalid or expired code' });
-  }
-
   try {
+    const { data, error } = await supabaseAdmin
+      .from('verification_codes')
+      .select('*')
+      .eq('email', email)
+      .limit(1)
+      .single();
+
+    if (error || !data) return res.status(400).json({ error: 'invalid or expired code' });
+
+    // check attempts
+    if (data.attempts >= MAX_ATTEMPTS) return res.status(429).json({ error: 'too many attempts' });
+
+    // verify hash
+    const hmac = require('crypto').createHmac('sha256', process.env.VERIFICATION_HMAC_SECRET || '').update(`${email}|${code}`).digest('hex');
+    if (hmac !== data.code_hash) {
+      // increment attempts
+      await supabaseAdmin.from('verification_codes').update({ attempts: (data.attempts || 0) + 1 }).eq('id', data.id);
+      return res.status(400).json({ error: 'invalid code' });
+    }
+
+    // check expiry
+    if (new Date(data.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'expired' });
+    }
+
     // create user via admin
     const { data: userData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
       email,

@@ -9,10 +9,12 @@ export default function RoomPage({ params }: any) {
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const [online, setOnline] = useState<any[]>([]);
+  const [typingUsers, setTypingUsers] = useState<any[]>([]);
   const pageSize = 30; // configurable
   const earliestRef = useRef<Date | null>(null);
   const { user } = useAuth();
   const presenceIntervalRef = useRef<any>(null);
+  const typingIntervalRef = useRef<any>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -57,6 +59,14 @@ export default function RoomPage({ params }: any) {
       })
       .subscribe();
 
+    // typing subscription
+    const typingChannel = supabase
+      .channel('public:typing')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'typing', filter: `room_id=eq.${id}` }, payload => {
+        fetchTyping();
+      })
+      .subscribe();
+
     // start heartbeat to upsert presence every 30s
     async function startPresence() {
       if (!user) return;
@@ -68,11 +78,16 @@ export default function RoomPage({ params }: any) {
 
     startPresence();
 
+    // poll typing to remove expired entries
+    typingIntervalRef.current = setInterval(() => fetchTyping(), 2000);
+
     return () => {
       mounted = false;
       channel.unsubscribe();
       presenceChannel.unsubscribe();
+      typingChannel.unsubscribe();
       if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
+      if (typingIntervalRef.current) clearInterval(typingIntervalRef.current);
     };
   }, [id, user]);
 
@@ -84,44 +99,40 @@ export default function RoomPage({ params }: any) {
     setOnline(profiles || []);
   }
 
+  async function fetchTyping() {
+    const now = new Date().toISOString();
+    const { data } = await supabase.from('typing').select('*').eq('room_id', id).gt('expires_at', now);
+    const userIds = (data || []).map((p: any) => p.user_id);
+    if (userIds.length === 0) { setTypingUsers([]); return; }
+    const { data: profiles } = await supabase.from('profiles').select('*').in('id', userIds);
+    setTypingUsers(profiles || []);
+  }
+
   async function upsertPresence() {
     if (!user) return;
     await supabase.from('presence').upsert([{ room_id: id, user_id: user.id, last_seen: new Date().toISOString() }]);
-  }
-
-  async function loadOlder() {
-    if (!earliestRef.current) return;
-    const before = earliestRef.current.toISOString();
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('room_id', id)
-      .lt('created_at', before)
-      .order('created_at', { ascending: false })
-      .limit(pageSize);
-
-    if (error) return console.error(error);
-    const msgs = (data || []).reverse();
-    if (msgs.length) {
-      setMessages(prev => [...msgs, ...prev]);
-      earliestRef.current = new Date(msgs[0].created_at);
-    }
-    setHasMore((data || []).length === pageSize);
   }
 
   async function send() {
     if (!text || !user) return;
     try {
       const client_msg_id = cryptoRandomUUID();
-      await supabase.from('messages').insert([{ room_id: id, content: text, author: user.id, client_msg_id }]);
+      const res = await fetch('/api/messages/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room_id: id, user_id: user.id, client_msg_id, content: text }) });
+      const j = await res.json();
+      if (!res.ok) console.error('send failed', j);
       setText('');
     } catch (e) {
       console.error(e);
     }
   }
 
+  function startTyping() {
+    if (!user) return;
+    // notify typing endpoint
+    fetch('/api/typing/upsert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ room_id: id, user_id: user.id }) });
+  }
+
   function cryptoRandomUUID() {
-    // fallback for environments without crypto.randomUUID
     if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) return (crypto as any).randomUUID();
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
       const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -136,6 +147,9 @@ export default function RoomPage({ params }: any) {
         在线：{online.map(u => <span key={u.id} style={{marginRight:8}}>{u.username || u.id}</span>)}
       </div>
       <div>
+        打字中：{typingUsers.map(u => <span key={u.id} style={{marginRight:8}}>{u.username || u.id}</span>)}
+      </div>
+      <div>
         {hasMore && <button onClick={loadOlder}>加载更早消息</button>}
       </div>
       <div style={{ height: 400, overflow: 'auto', border: '1px solid #ddd', padding: 8 }}>
@@ -144,7 +158,7 @@ export default function RoomPage({ params }: any) {
         ))}
       </div>
       <div>
-        <input value={text} onChange={e => setText(e.target.value)} />
+        <input value={text} onChange={e => { setText(e.target.value); startTyping(); }} />
         <button onClick={send}>Send</button>
       </div>
     </div>
