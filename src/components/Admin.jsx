@@ -5,6 +5,7 @@ export default function Admin({ profile, onBack }) {
   const [tab, setTab] = useState('overview')
   const [stats, setStats] = useState({ total: 0, male: 0, female: 0, online: 0, pending: 0 })
   const [pendingUsers, setPendingUsers] = useState([])
+  const [allUsers, setAllUsers] = useState([])
   const [inviteCodes, setInviteCodes] = useState([])
   const [gifts, setGifts] = useState([])
   const [recharges, setRecharges] = useState([])
@@ -13,6 +14,7 @@ export default function Admin({ profile, onBack }) {
   const [newCode, setNewCode] = useState('')
   const [giftForm, setGiftForm] = useState({ name: '', price: '', icon_url: '' })
   const [rechargeForm, setRechargeForm] = useState({ userId: '', amount: '' })
+  const [userSearch, setUserSearch] = useState('')
 
   useEffect(() => {
     loadAll()
@@ -23,6 +25,7 @@ export default function Admin({ profile, onBack }) {
     await Promise.all([
       loadStats(),
       loadPending(),
+      loadUsers(),
       loadCodes(),
       loadGifts(),
       loadRecharges(),
@@ -35,7 +38,7 @@ export default function Admin({ profile, onBack }) {
     const { data: profiles } = await supabase.from('profiles').select('id, gender, is_approved, last_seen')
     const list = profiles || []
     const now = Date.now()
-    const onlineThreshold = 5 * 60 * 1000 // 5分钟内算在线
+    const onlineThreshold = 5 * 60 * 1000
 
     setStats({
       total: list.length,
@@ -49,6 +52,15 @@ export default function Admin({ profile, onBack }) {
   async function loadPending() {
     const { data } = await supabase.from('profiles').select('*').eq('is_approved', false).order('created_at', { ascending: false })
     setPendingUsers(data || [])
+  }
+
+  async function loadUsers() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, username, gender, age, max_devices, is_approved, last_seen, balance')
+      .order('created_at', { ascending: false })
+      .limit(200)
+    setAllUsers(data || [])
   }
 
   async function loadCodes() {
@@ -75,6 +87,13 @@ export default function Admin({ profile, onBack }) {
     await supabase.from('profiles').update({ is_approved: true }).eq('id', userId)
     loadPending()
     loadStats()
+    loadUsers()
+  }
+
+  async function setMaxDevices(userId, value) {
+    const n = Math.min(10, Math.max(1, parseInt(value, 10) || 1))
+    await supabase.from('profiles').update({ max_devices: n }).eq('id', userId)
+    loadUsers()
   }
 
   async function generateCode() {
@@ -111,7 +130,6 @@ export default function Admin({ profile, onBack }) {
     const amount = parseFloat(rechargeForm.amount)
     if (!rechargeForm.userId || !amount || amount <= 0) return alert('请填写正确信息')
 
-    // 增加余额
     const { data: user } = await supabase.from('profiles').select('balance').eq('id', rechargeForm.userId).single()
     if (!user) return alert('用户不存在')
 
@@ -129,9 +147,17 @@ export default function Admin({ profile, onBack }) {
     alert('充值成功')
   }
 
+  const filteredUsers = userSearch.trim()
+    ? allUsers.filter(u =>
+        u.username?.toLowerCase().includes(userSearch.toLowerCase()) ||
+        u.id.includes(userSearch)
+      )
+    : allUsers
+
   const tabs = [
     { id: 'overview', label: '数据概览' },
     { id: 'pending', label: `待审核 (${stats.pending})` },
+    { id: 'users', label: '用户设备' },
     { id: 'codes', label: '邀请码' },
     { id: 'gifts', label: '礼物管理' },
     { id: 'finance', label: '财务记录' }
@@ -139,7 +165,6 @@ export default function Admin({ profile, onBack }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-primary)' }}>
-      {/* 顶部 */}
       <div style={{
         padding: '14px 16px', borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 12, background: 'var(--bg-secondary)'
@@ -148,7 +173,6 @@ export default function Admin({ profile, onBack }) {
         <span style={{ fontWeight: 700, fontSize: 18 }}>管理看板</span>
       </div>
 
-      {/* Tab 导航 */}
       <div style={{ display: 'flex', overflowX: 'auto', borderBottom: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
         {tabs.map(t => (
           <button
@@ -169,7 +193,6 @@ export default function Admin({ profile, onBack }) {
           <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>加载中...</p>
         ) : (
           <>
-            {/* 数据概览 */}
             {tab === 'overview' && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
                 <StatCard title="总用户" value={stats.total} color="#2aabee" />
@@ -180,11 +203,8 @@ export default function Admin({ profile, onBack }) {
               </div>
             )}
 
-            {/* 待审核 */}
             {tab === 'pending' && (
-              pendingUsers.length === 0 ? (
-                <Empty text="暂无待审核用户" />
-              ) : pendingUsers.map(u => (
+              pendingUsers.length === 0 ? <Empty text="暂无待审核用户" /> : pendingUsers.map(u => (
                 <div key={u.id} className="card" style={{ padding: 14, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
                   <Avatar gender={u.gender} name={u.username} />
                   <div style={{ flex: 1 }}>
@@ -196,7 +216,49 @@ export default function Admin({ profile, onBack }) {
               ))
             )}
 
-            {/* 邀请码 */}
+            {/* 用户设备管理 */}
+            {tab === 'users' && (
+              <>
+                <input
+                  className="input"
+                  placeholder="搜索用户名或 ID"
+                  value={userSearch}
+                  onChange={e => setUserSearch(e.target.value)}
+                  style={{ marginBottom: 12 }}
+                />
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                  默认每账号 1 台设备。可设置 1-10 台允许同时登录。
+                </p>
+                {filteredUsers.map(u => (
+                  <div key={u.id} className="card" style={{ padding: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <Avatar gender={u.gender} name={u.username} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{u.username}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {u.gender === 'male' ? '♂' : '♀'} · {u.age}岁
+                        {!u.is_approved && ' · 待审核'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>设备数</span>
+                      <select
+                        value={u.max_devices || 1}
+                        onChange={e => setMaxDevices(u.id, e.target.value)}
+                        style={{
+                          background: 'var(--bg-tertiary)', color: 'var(--text-primary)',
+                          border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px'
+                        }}
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
             {tab === 'codes' && (
               <>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -221,14 +283,13 @@ export default function Admin({ profile, onBack }) {
               </>
             )}
 
-            {/* 礼物管理 */}
             {tab === 'gifts' && (
               <>
                 <div className="card" style={{ padding: 16, marginBottom: 16 }}>
                   <div style={{ fontWeight: 600, marginBottom: 12 }}>新增礼物</div>
                   <input className="input" placeholder="礼物名称" value={giftForm.name} onChange={e => setGiftForm({ ...giftForm, name: e.target.value })} style={{ marginBottom: 8 }} />
                   <input className="input" type="number" placeholder="价格（元）" value={giftForm.price} onChange={e => setGiftForm({ ...giftForm, price: e.target.value })} style={{ marginBottom: 8 }} />
-                  <input className="input" placeholder="图标 URL（可选，可先上传到 Storage）" value={giftForm.icon_url} onChange={e => setGiftForm({ ...giftForm, icon_url: e.target.value })} style={{ marginBottom: 12 }} />
+                  <input className="input" placeholder="图标 URL（可选）" value={giftForm.icon_url} onChange={e => setGiftForm({ ...giftForm, icon_url: e.target.value })} style={{ marginBottom: 12 }} />
                   <button className="btn btn-primary" onClick={saveGift}>添加礼物</button>
                 </div>
                 {gifts.map(g => (
@@ -246,7 +307,6 @@ export default function Admin({ profile, onBack }) {
               </>
             )}
 
-            {/* 财务 */}
             {tab === 'finance' && (
               <>
                 <div className="card" style={{ padding: 16, marginBottom: 16 }}>
