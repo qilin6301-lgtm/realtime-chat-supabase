@@ -8,9 +8,11 @@ export default function RoomPage({ params }: any) {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
+  const [online, setOnline] = useState<any[]>([]);
   const pageSize = 30; // configurable
   const earliestRef = useRef<Date | null>(null);
   const { user } = useAuth();
+  const presenceIntervalRef = useRef<any>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -46,11 +48,46 @@ export default function RoomPage({ params }: any) {
       })
       .subscribe();
 
+    // presence subscription
+    const presenceChannel = supabase
+      .channel('public:presence')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'presence', filter: `room_id=eq.${id}` }, payload => {
+        // fetch current presence list after change
+        fetchPresence();
+      })
+      .subscribe();
+
+    // start heartbeat to upsert presence every 30s
+    async function startPresence() {
+      if (!user) return;
+      await upsertPresence();
+      presenceIntervalRef.current = setInterval(() => { upsertPresence(); }, 30000);
+      // initial fetch
+      fetchPresence();
+    }
+
+    startPresence();
+
     return () => {
       mounted = false;
       channel.unsubscribe();
+      presenceChannel.unsubscribe();
+      if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
     };
-  }, [id]);
+  }, [id, user]);
+
+  async function fetchPresence() {
+    const { data } = await supabase.from('presence').select('*').eq('room_id', id);
+    const userIds = (data || []).map((p: any) => p.user_id);
+    if (userIds.length === 0) { setOnline([]); return; }
+    const { data: profiles } = await supabase.from('profiles').select('*').in('id', userIds);
+    setOnline(profiles || []);
+  }
+
+  async function upsertPresence() {
+    if (!user) return;
+    await supabase.from('presence').upsert([{ room_id: id, user_id: user.id, last_seen: new Date().toISOString() }]);
+  }
 
   async function loadOlder() {
     if (!earliestRef.current) return;
@@ -73,18 +110,31 @@ export default function RoomPage({ params }: any) {
   }
 
   async function send() {
-    if (!text) return;
+    if (!text || !user) return;
     try {
-      await supabase.from('messages').insert([{ room_id: id, content: text, author: user?.id }]);
+      const client_msg_id = cryptoRandomUUID();
+      await supabase.from('messages').insert([{ room_id: id, content: text, author: user.id, client_msg_id }]);
       setText('');
     } catch (e) {
       console.error(e);
     }
   }
 
+  function cryptoRandomUUID() {
+    // fallback for environments without crypto.randomUUID
+    if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) return (crypto as any).randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   return (
     <div style={{ padding: 24 }}>
       <h2>Room {id}</h2>
+      <div>
+        在线：{online.map(u => <span key={u.id} style={{marginRight:8}}>{u.username || u.id}</span>)}
+      </div>
       <div>
         {hasMore && <button onClick={loadOlder}>加载更早消息</button>}
       </div>

@@ -20,6 +20,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'email required' });
 
+  // simple rate limit: max 5 codes per email per hour
+  try {
+    const { data: recent, error: recentErr } = await supabaseAdmin
+      .from('verification_codes')
+      .select('id')
+      .eq('email', email)
+      .gt('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString());
+    if (recentErr) console.warn('rate check failed', recentErr);
+    if (recent && recent.length >= 5) {
+      return res.status(429).json({ error: 'too many requests, try later' });
+    }
+  } catch (e) {
+    console.error('rate check exception', e);
+  }
+
   const code = makeCode();
   const codeHash = hashCode(email, code);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes
