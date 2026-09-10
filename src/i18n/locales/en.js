@@ -93,5 +93,9 @@ export default {
   approve: 'Approve',
   generate: 'Generate',
   max_devices: 'Devices',
-  id_label: 'ID'
+  id_label: 'ID',
+  theme: 'Appearance',
+  theme_day: 'Day',
+  theme_night: 'Night',
+  theme_night_accent: 'Night Blue'
 }
