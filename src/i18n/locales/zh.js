@@ -93,5 +93,9 @@ export default {
   approve: '批准',
   generate: '生成',
   max_devices: '设备数',
-  id_label: 'ID'
+  id_label: 'ID',
+  theme: '外观主题',
+  theme_day: '日间',
+  theme_night: '夜间',
+  theme_night_accent: '深蓝夜'
 }
