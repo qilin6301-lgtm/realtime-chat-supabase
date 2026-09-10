@@ -12,9 +12,13 @@ export default function Layout({ session, profile, onProfileUpdate }) {
   const { t, countryName } = useI18n()
   const [activeTab, setActiveTab] = useState('chats')
   const [activeConversation, setActiveConversation] = useState(null)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 768)
 
   useEffect(() => {
     ensureNotificationPermission()
+    const onResize = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   const openChat = (conversation, otherUser) => {
@@ -31,28 +35,27 @@ export default function Layout({ session, profile, onProfileUpdate }) {
     { id: 'profile', label: t('profile'), icon: '👤' }
   ]
 
+  // 移动端：打开聊天时隐藏侧边栏；桌面：侧边栏始终可见（Telegram 双栏）
+  const hideSidebar = isMobile && !!activeConversation
+  const showChatPane = !!activeConversation || !isMobile
+
   return (
     <div className="app-layout">
-      <div className="sidebar" style={{ display: activeConversation ? 'none' : 'flex' }}>
-        <div style={{
-          padding: '16px 20px', borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', gap: 12
-        }}>
+      <div className="sidebar" style={{ display: hideSidebar ? 'none' : 'flex' }}>
+        <div className="sidebar-header">
           {profile.avatar_url ? (
-            <img src={profile.avatar_url} alt="" style={{ width: 42, height: 42, borderRadius: '50%', objectFit: 'cover' }} />
+            <img src={profile.avatar_url} alt="" className="avatar-img sm" />
           ) : (
-            <div style={{
-              width: 42, height: 42, borderRadius: '50%',
-              background: profile.gender === 'male' ? 'var(--male)' : 'var(--female)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 700, fontSize: 18, color: '#0e0e0e'
-            }}>{profile.username?.[0]?.toUpperCase() || '?'}</div>
+            <div
+              className="avatar-fallback sm"
+              style={{ background: profile.gender === 'male' ? 'var(--male)' : 'var(--female)' }}
+            >
+              {profile.username?.[0]?.toUpperCase() || '?'}
+            </div>
           )}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {profile.username}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            <div className="sidebar-username">{profile.username}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               <span className={`gender-tag ${profile.gender === 'male' ? 'gender-male' : 'gender-female'}`}>
                 {profile.gender === 'male' ? '♂' : '♀'} {t('years_old', { age: profile.age })}
               </span>
@@ -63,52 +66,64 @@ export default function Layout({ session, profile, onProfileUpdate }) {
 
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {activeTab === 'square' && <Square profile={profile} />}
-          {activeTab === 'chats' && <Chats profile={profile} onSelectConversation={openChat} />}
+          {activeTab === 'chats' && (
+            <Chats
+              profile={profile}
+              onSelectConversation={openChat}
+              activeId={activeConversation?.id}
+            />
+          )}
           {activeTab === 'friends' && <Friends profile={profile} onStartChat={openChat} />}
           {activeTab === 'profile' && (
-            <Profile profile={profile} session={session} onProfileUpdate={onProfileUpdate} onOpenAdmin={() => setActiveTab('admin')} />
+            <Profile
+              profile={profile}
+              session={session}
+              onProfileUpdate={onProfileUpdate}
+              onOpenAdmin={() => setActiveTab('admin')}
+            />
           )}
           {activeTab === 'admin' && profile.is_admin && (
             <Admin profile={profile} onBack={() => setActiveTab('profile')} />
           )}
         </div>
 
-        <div style={{ display: 'flex', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+        <nav className="bottom-tabs">
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
-              onClick={() => { setActiveTab(item.id); setActiveConversation(null) }}
-              style={{
-                flex: 1, padding: '12px 0', background: 'transparent', border: 'none',
-                color: activeTab === item.id ? 'var(--accent)' : 'var(--text-secondary)',
-                cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                fontSize: 12, fontWeight: activeTab === item.id ? 600 : 400
+              type="button"
+              className={`nav-tab ${activeTab === item.id ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab(item.id)
+                if (isMobile) setActiveConversation(null)
               }}
             >
               <span style={{ fontSize: 20 }}>{item.icon}</span>
               {item.label}
             </button>
           ))}
-        </div>
+        </nav>
       </div>
 
-      <div className="main-content" style={{ display: activeConversation ? 'flex' : 'none' }}>
-        {activeConversation && (
-          <ChatWindow conversation={activeConversation} profile={profile} onProfileUpdate={onProfileUpdate} onBack={closeChat} />
+      <div className="main-content" style={{ display: showChatPane ? 'flex' : 'none' }}>
+        {activeConversation ? (
+          <ChatWindow
+            conversation={activeConversation}
+            profile={profile}
+            onProfileUpdate={onProfileUpdate}
+            onBack={closeChat}
+          />
+        ) : (
+          <div className="welcome-pane">
+            <div className="welcome-icon">💕</div>
+            <p style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)' }}>{t('welcome')}</p>
+            <p style={{ fontSize: 14, color: 'var(--text-secondary)', maxWidth: 280, textAlign: 'center' }}>
+              {t('select_chat')}
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{t('only_opposite')}</p>
+          </div>
         )}
       </div>
-
-      {!activeConversation && (
-        <div className="main-content" style={{
-          display: typeof window !== 'undefined' && window.innerWidth > 768 ? 'flex' : 'none',
-          alignItems: 'center', justifyContent: 'center',
-          color: 'var(--text-muted)', flexDirection: 'column', gap: 12
-        }}>
-          <div style={{ fontSize: 64, opacity: 0.3 }}>💕</div>
-          <p>{t('welcome')}</p>
-          <p style={{ fontSize: 13 }}>{t('only_opposite')}</p>
-        </div>
-      )}
     </div>
   )
 }
