@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useI18n } from '../i18n'
+import { useTheme, THEMES } from '../theme/ThemeContext'
 
 export default function Auth({ onAuthSuccess }) {
   const { t, lang, setLang, LANG_LIST, COUNTRIES, countryName } = useI18n()
+  const { theme, setTheme } = useTheme()
   const [step, setStep] = useState('email')
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
@@ -128,19 +130,25 @@ export default function Auth({ onAuthSuccess }) {
   }
 
   return (
-    <div style={{
-      display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(145deg, #0e1621 0%, #1a2634 50%, #0e1621 100%)', padding: 20
-    }}>
+    <div className="auth-bg">
       <div className="card fade-in" style={{ width: '100%', maxWidth: 420, padding: '32px 28px' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+          <select
+            value={theme}
+            onChange={e => setTheme(e.target.value)}
+            className="input"
+            style={{ width: 'auto', padding: '6px 10px', fontSize: 13 }}
+            title={t('theme')}
+          >
+            {THEMES.map(th => (
+              <option key={th.id} value={th.id}>{th.icon} {t(th.labelKey)}</option>
+            ))}
+          </select>
           <select
             value={lang}
             onChange={e => setLang(e.target.value)}
-            style={{
-              background: 'var(--bg-tertiary)', color: 'var(--text-primary)',
-              border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: 13
-            }}
+            className="input"
+            style={{ width: 'auto', padding: '6px 10px', fontSize: 13 }}
           >
             {LANG_LIST.map(l => (
               <option key={l.code} value={l.code}>{l.native}</option>
@@ -151,7 +159,7 @@ export default function Auth({ onAuthSuccess }) {
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{
             width: 64, height: 64, borderRadius: '50%',
-            background: 'linear-gradient(135deg, #2aabee, #1e96d1)',
+            background: 'linear-gradient(135deg, var(--accent), var(--accent-hover))',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             margin: '0 auto 16px', fontSize: 28
           }}>💬</div>
@@ -163,8 +171,8 @@ export default function Auth({ onAuthSuccess }) {
           </p>
         </div>
 
-        {error && <div style={{ background: 'rgba(229,57,53,0.12)', color: '#ff8a80', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{error}</div>}
-        {info && <div style={{ background: 'rgba(42,171,238,0.12)', color: '#81d4fa', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{info}</div>}
+        {error && <div style={{ background: 'rgba(229,57,53,0.12)', color: '#e57373', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{error}</div>}
+        {info && <div style={{ background: 'var(--accent-soft)', color: 'var(--accent)', padding: '10px 14px', borderRadius: 8, marginBottom: 16, fontSize: 14 }}>{info}</div>}
 
         {step === 'email' && (
           <form onSubmit={sendOtp}>
@@ -193,13 +201,7 @@ export default function Auth({ onAuthSuccess }) {
               <button type="button" className={`btn ${gender === 'female' ? 'btn-primary' : 'btn-ghost'}`} style={{ flex: 1 }} onClick={() => setGender('female')}>♀ {t('female')}</button>
             </div>
             <input className="input" type="number" placeholder={t('age')} value={age} onChange={e => setAge(e.target.value)} min={18} max={99} required style={{ marginBottom: 12 }} />
-            <select
-              className="input"
-              value={country}
-              onChange={e => setCountry(e.target.value)}
-              required
-              style={{ marginBottom: 12 }}
-            >
+            <select className="input" value={country} onChange={e => setCountry(e.target.value)} required style={{ marginBottom: 12 }}>
               <option value="">{t('select_country')}</option>
               {COUNTRIES.map(c => (
                 <option key={c.code} value={c.code}>{countryName(c.code)}</option>
