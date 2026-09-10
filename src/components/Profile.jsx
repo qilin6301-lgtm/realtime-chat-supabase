@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useI18n } from '../i18n'
+import { useTheme, THEMES } from '../theme/ThemeContext'
 
 const DEFAULT_AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
@@ -13,8 +14,15 @@ const DEFAULT_AVATARS = [
   'https://api.dicebear.com/7.x/avataaars/svg?seed=Emma'
 ]
 
+const THEME_PREVIEW = {
+  day: ['#ffffff', '#f4f4f5', '#3390ec'],
+  night: ['#0e0e0e', '#17212b', '#2aabee'],
+  nightAccent: ['#0a1520', '#122233', '#6ab3f3']
+}
+
 export default function Profile({ profile, session, onProfileUpdate, onOpenAdmin }) {
   const { t, lang, setLang, LANG_LIST, countryName, COUNTRIES } = useI18n()
+  const { theme, setTheme } = useTheme()
   const [showAvatarPicker, setShowAvatarPicker] = useState(false)
   const [uploading, setUploading] = useState(false)
   const fileRef = useRef(null)
@@ -70,16 +78,16 @@ export default function Profile({ profile, session, onProfileUpdate, onOpenAdmin
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <div style={{ position: 'relative', display: 'inline-block', marginBottom: 14 }}>
           {profile.avatar_url ? (
-            <img src={profile.avatar_url} alt="" style={{ width: 88, height: 88, borderRadius: '50%', objectFit: 'cover', boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }} />
+            <img src={profile.avatar_url} alt="" style={{ width: 88, height: 88, borderRadius: '50%', objectFit: 'cover', boxShadow: 'var(--shadow)' }} />
           ) : (
             <div style={{
               width: 88, height: 88, borderRadius: '50%',
               background: profile.gender === 'male' ? 'var(--male)' : 'var(--female)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 700, fontSize: 36, color: '#0e0e0e', boxShadow: '0 8px 24px rgba(0,0,0,0.3)'
+              fontWeight: 700, fontSize: 36, color: '#0e0e0e', boxShadow: 'var(--shadow)'
             }}>{profile.username?.[0]?.toUpperCase()}</div>
           )}
-          <span style={{ position: 'absolute', bottom: 2, right: 2, width: 16, height: 16, borderRadius: '50%', background: '#4fae4e', border: '2px solid var(--bg-secondary)' }} />
+          <span style={{ position: 'absolute', bottom: 2, right: 2, width: 16, height: 16, borderRadius: '50%', background: 'var(--online)', border: '2px solid var(--bg-secondary)' }} />
         </div>
 
         <button className="btn btn-ghost" style={{ marginBottom: 12, fontSize: 13 }} onClick={() => setShowAvatarPicker(!showAvatarPicker)}>
@@ -122,14 +130,35 @@ export default function Profile({ profile, session, onProfileUpdate, onOpenAdmin
         </p>
       </div>
 
+      {/* 外观主题 – Telegram style */}
+      <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10 }}>{t('theme')}</div>
+        <div className="theme-grid">
+          {THEMES.map(th => {
+            const colors = THEME_PREVIEW[th.id]
+            return (
+              <button
+                key={th.id}
+                type="button"
+                className={`theme-card ${theme === th.id ? 'active' : ''}`}
+                onClick={() => setTheme(th.id)}
+              >
+                <div className="preview">
+                  <span style={{ background: colors[0] }} />
+                  <span style={{ background: colors[1] }} />
+                  <span style={{ background: colors[2] }} />
+                </div>
+                <div>{th.icon} {t(th.labelKey)}</div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       {/* 语言 */}
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>{t('language')}</div>
-        <select
-          className="input"
-          value={lang}
-          onChange={e => setLang(e.target.value)}
-        >
+        <select className="input" value={lang} onChange={e => setLang(e.target.value)}>
           {LANG_LIST.map(l => (
             <option key={l.code} value={l.code}>{l.native} ({l.name})</option>
           ))}
@@ -139,11 +168,7 @@ export default function Profile({ profile, session, onProfileUpdate, onOpenAdmin
       {/* 国家 */}
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>{t('country')}</div>
-        <select
-          className="input"
-          value={profile.country || ''}
-          onChange={e => updateCountry(e.target.value)}
-        >
+        <select className="input" value={profile.country || ''} onChange={e => updateCountry(e.target.value)}>
           <option value="">{t('select_country')}</option>
           {COUNTRIES.map(c => (
             <option key={c.code} value={c.code}>{countryName(c.code)}</option>
