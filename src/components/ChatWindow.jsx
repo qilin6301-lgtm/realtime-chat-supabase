@@ -5,7 +5,7 @@ import { notifyNewMessage } from '../lib/notify'
 
 const EMOJIS = ['😀','😂','🥰','😍','😘','😊','🤔','😅','😭','😡','👍','👎','❤️','🔥','🎉','🌹','💋','🎁','💯','🙏']
 
-export default function ChatWindow({ conversation, profile, onBack }) {
+export default function ChatWindow({ conversation, profile, onProfileUpdate, onBack }) {
   const { t, countryName } = useI18n()
   const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
@@ -18,10 +18,12 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
   const [peerTyping, setPeerTyping] = useState(false)
+  const [sending, setSending] = useState(false)
   const endRef = useRef(null)
   const fileRef = useRef(null)
   const typingChannelRef = useRef(null)
   const typingTimerRef = useRef(null)
+  const typingThrottleRef = useRef(null)
   const other = conversation.otherUser
 
   useEffect(() => {
@@ -38,7 +40,13 @@ export default function ChatWindow({ conversation, profile, onBack }) {
         filter: `conversation_id=eq.${conversation.id}`
       }, (payload) => {
         const msg = payload.new
-        setMessages(prev => [...prev, msg])
+        setMessages(prev => {
+          if (prev.some(item => item.id === msg.id)) return prev
+          return [...prev, msg].sort((a, b) => {
+            const timeDiff = new Date(a.created_at) - new Date(b.created_at)
+            return timeDiff || String(a.id).localeCompare(String(b.id))
+          })
+        })
         if (msg.sender_id !== profile.id) {
           markAsRead()
           notifyNewMessage({
@@ -74,6 +82,7 @@ export default function ChatWindow({ conversation, profile, onBack }) {
       supabase.removeChannel(channel)
       supabase.removeChannel(typingCh)
       clearTimeout(typingTimerRef.current)
+      clearTimeout(typingThrottleRef.current)
     }
   }, [conversation.id])
 
@@ -82,6 +91,8 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   }, [messages, peerTyping])
 
   function broadcastTyping() {
+    if (typingThrottleRef.current) return
+    typingThrottleRef.current = setTimeout(() => { typingThrottleRef.current = null }, 350)
     typingChannelRef.current?.send({
       type: 'broadcast',
       event: 'typing',
@@ -117,30 +128,35 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   }
 
   async function markAsRead() {
-    await supabase.from('messages').update({ read_at: new Date().toISOString() })
-      .eq('conversation_id', conversation.id).neq('sender_id', profile.id).is('read_at', null)
+    await supabase.rpc('mark_conversation_read', { p_conversation_id: conversation.id })
   }
 
   async function sendMessage(content, msg_type = 'text', gift_id = null) {
+    if (sending) return false
     if (other.gender === profile.gender) {
       alert(t('same_gender_block'))
-      return
+      return false
     }
+    setSending(true)
     const { error } = await supabase.from('messages').insert({
       conversation_id: conversation.id,
       sender_id: profile.id,
       content,
       msg_type,
-      gift_id
+      gift_id,
+      client_request_id: crypto.randomUUID()
     })
     if (error) {
       alert(error.message)
-      return
+      setSending(false)
+      return false
     }
     await supabase.from('conversations').update({
       last_message: msg_type === 'gift' ? `[${t('gift')}]` : msg_type === 'image' ? '[image]' : content,
       last_message_at: new Date().toISOString()
     }).eq('id', conversation.id)
+    setSending(false)
+    return true
   }
 
   async function handleSend(e) {
@@ -153,13 +169,8 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   }
 
   async function toggleLike(msg) {
-    if (myLikes.has(msg.id)) {
-      await supabase.from('message_likes').delete().eq('message_id', msg.id).eq('user_id', profile.id)
-      await supabase.from('messages').update({ likes_count: Math.max(0, (msg.likes_count || 1) - 1) }).eq('id', msg.id)
-    } else {
-      await supabase.from('message_likes').insert({ message_id: msg.id, user_id: profile.id })
-      await supabase.from('messages').update({ likes_count: (msg.likes_count || 0) + 1 }).eq('id', msg.id)
-    }
+    const { error } = await supabase.rpc('toggle_message_like', { p_message_id: msg.id })
+    if (error) alert(error.message)
     fetchMessages()
   }
 
@@ -179,21 +190,21 @@ export default function ChatWindow({ conversation, profile, onBack }) {
   }
 
   async function sendGift(gift) {
-    if (parseFloat(profile.balance) < parseFloat(gift.price)) {
-      alert(t('insufficient_balance'))
+    if (sending) return
+    setSending(true)
+    const { data, error } = await supabase.rpc('send_gift', {
+      p_gift_id: gift.id,
+      p_receiver_id: other.id,
+      p_conversation_id: conversation.id,
+      p_client_request_id: crypto.randomUUID()
+    })
+    if (error) {
+      alert(error.message.includes('insufficient') ? t('insufficient_balance') : error.message)
+      setSending(false)
       return
     }
-    const newBalance = parseFloat(profile.balance) - parseFloat(gift.price)
-    await supabase.from('profiles').update({ balance: newBalance }).eq('id', profile.id)
-    await supabase.from('consume_records').insert({
-      user_id: profile.id, amount: gift.price, type: 'gift', related_id: gift.id,
-      remark: `${gift.name} -> ${other.username}`
-    })
-    await supabase.from('gift_sends').insert({
-      gift_id: gift.id, sender_id: profile.id, receiver_id: other.id,
-      conversation_id: conversation.id, price: gift.price
-    })
-    await sendMessage(gift.name, 'gift', gift.id)
+    if (data?.balance !== undefined) onProfileUpdate?.({ ...profile, balance: data.balance })
+    setSending(false)
     setShowGifts(false)
   }
 
@@ -317,10 +328,10 @@ export default function ChatWindow({ conversation, profile, onBack }) {
 
       {showGifts && (
         <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', maxHeight: 200, overflowY: 'auto' }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{t('send_gift')} (¥{(profile.balance || 0).toFixed(2)})</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{t('send_gift')} (¥{Number(profile.balance || 0).toFixed(2)})</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
             {gifts.map(g => (
-              <button key={g.id} onClick={() => sendGift(g)} style={{
+              <button key={g.id} disabled={sending} onClick={() => sendGift(g)} style={{
                 background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 10,
                 padding: '8px 12px', cursor: 'pointer', color: 'var(--text-primary)', minWidth: 70, textAlign: 'center'
               }}>
@@ -348,7 +359,7 @@ export default function ChatWindow({ conversation, profile, onBack }) {
           placeholder={t('input_message')}
           style={{ borderRadius: 22, padding: '10px 16px', flex: 1 }}
         />
-        <button className="btn btn-primary" type="submit" style={{ borderRadius: 22, padding: '10px 16px' }}>{t('send')}</button>
+        <button className="btn btn-primary" disabled={sending} type="submit" style={{ borderRadius: 22, padding: '10px 16px' }}>{t('send')}</button>
       </form>
     </div>
   )

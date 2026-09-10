@@ -94,7 +94,7 @@ export default function Layout({ session, profile, onProfileUpdate }) {
 
       <div className="main-content" style={{ display: activeConversation ? 'flex' : 'none' }}>
         {activeConversation && (
-          <ChatWindow conversation={activeConversation} profile={profile} onBack={closeChat} />
+          <ChatWindow conversation={activeConversation} profile={profile} onProfileUpdate={onProfileUpdate} onBack={closeChat} />
         )}
       </div>
 

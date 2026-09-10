@@ -23,6 +23,8 @@
 
 ## 数据库初始化（请完整执行）
 
+> 生产环境请先完成下方基础表初始化，再执行 `supabase/rls_tighten.sql`。该安全迁移会收紧 RLS、增加消息幂等字段，并创建统一会话和原子送礼函数。不要把文档中的简化策略直接用于生产环境。
+
 ```sql
 -- ========== 用户资料 ==========
 create table if not exists public.profiles (
@@ -192,6 +194,10 @@ create policy "recharge_own" on public.recharge_records for select using (auth.u
 create policy "recharge_admin" on public.recharge_records for insert with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
 create policy "consume_own" on public.consume_records for all using (auth.uid() = user_id or exists (select 1 from profiles where id = auth.uid() and is_admin));
 ```
+
+### 安全迁移
+
+执行 `supabase/rls_tighten.sql` 后，客户端不得直接更新 `profiles.balance`、`profiles.is_admin`、`profiles.is_approved` 或 `profiles.max_devices`。充值应由管理员受控操作，送礼必须通过 `send_gift` 数据库函数完成。
 
 ### Storage
 

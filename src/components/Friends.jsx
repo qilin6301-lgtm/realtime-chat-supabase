@@ -75,24 +75,12 @@ export default function Friends({ profile, onStartChat }) {
       alert(t('same_gender_block'))
       return
     }
-    const [u1, u2] = [profile.id, target.id].sort()
-    let { data: conv } = await supabase
-      .from('conversations')
-      .select('*')
-      .eq('user1_id', u1)
-      .eq('user2_id', u2)
-      .single()
-    if (!conv) {
-      const { data: newConv, error } = await supabase
-        .from('conversations')
-        .insert({ user1_id: u1, user2_id: u2 })
-        .select()
-        .single()
-      if (error) {
-        alert(error.message)
-        return
-      }
-      conv = newConv
+    const { data: conv, error } = await supabase.rpc('get_or_create_conversation', {
+      p_other_user_id: target.id
+    })
+    if (error) {
+      alert(error.message)
+      return
     }
     onStartChat(conv, target)
   }
